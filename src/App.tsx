@@ -3,14 +3,67 @@ import logo from './logo.svg';
 
 
 /* Firestore */
-import { getFirestore, getDocs, collection, CollectionReference } from "firebase/firestore"
+import { getFirestore, getDocs, collection, CollectionReference, addDoc } from "firebase/firestore"
+import { worker } from 'cluster';
+import { async } from '@firebase/util';
 
 type Task = {
+  id : string,
   created: Date,
   detail: string,
   driver: string,
   title: string
 }
+
+enum PomodoroType  {
+  work,
+  break
+}
+
+enum PomodoroStatus {
+  prestart,
+  running,
+  stop,
+  end
+}
+
+type Pomodoro = {
+  minutes : number,
+  next? : Pomodoro,
+  task : Task,
+  type : PomodoroType,
+  status : PomodoroStatus,
+  startTime : Date
+}
+
+class Timer{
+  seconds : number
+  minutes : number;
+  constructor(minutes : number){
+    this.minutes = minutes;
+    this.seconds = minutes * 60;
+  }
+
+  public tick() : number {
+    return --this.seconds;
+  }
+
+  public doEnd() : boolean {
+    return this.seconds <= 0 ? true : false;
+  }
+}
+
+//学習用
+class Timer2 { 
+  seconds: number;
+  constructor(seconds: number) {
+    this.seconds = seconds
+  }
+  public tick() : number {
+    return --this.seconds;
+  }
+}
+//学習用ここまで
 
 async function getTaskList(): Promise<Task[]> {
   const db = getFirestore();
@@ -20,6 +73,7 @@ async function getTaskList(): Promise<Task[]> {
   const tasks: Task[] = [];
   q.forEach((task) => {
     tasks.push({
+      id : task.id,
       created: task.data().created,
       detail: task.data().detail,
       driver: task.data().driver,
@@ -27,6 +81,27 @@ async function getTaskList(): Promise<Task[]> {
     });
   });
   return tasks;
+}
+
+async function createPomodoro(task : Task) {
+  const db = getFirestore();
+  const ref: CollectionReference = collection(db, "pomodoro");
+  addDoc(ref, {
+    minutes : 25,
+    next : null,
+    task : task,
+    type : PomodoroType.work,
+    status : PomodoroStatus.prestart,
+    startTime : Date.now()
+  })
+}
+
+function useValueRef<T>(val: T) {
+  const ref = React.useRef(val);
+  React.useEffect(() => {
+    ref.current = val;
+  }, [val]);
+  return ref;
 }
 
 
@@ -38,7 +113,12 @@ function App() {
     driver: "Yugo"
   });
   const [count, setCount] = useState(0);
-  const intervalRef = useRef(null);
+
+  const [timers, setTimers] = useState<Timer[]>([]);
+  const refTimers = useValueRef(timers);
+
+  //State宣言
+  const [sample, setSample] = useState<Timer2>();
 
   const getTaskListFromFirestore = async () => {
     const tasks = await getTaskList();
@@ -64,15 +144,25 @@ function App() {
     });
   }
 
-  const timerStart = useCallback(() => {
-    if (intervalRef.current !== null) {
-      return;
+  const callbackTimer = () => {
+    for(const t of refTimers.current){
+      if(!t.doEnd()){
+        console.log(t.tick());
+      }
     }
-  }, []);
-
+  }
   useEffect(() => {
     getTaskListFromFirestore();
+    const id = setInterval(() => {
+      callbackTimer();
+    }, 1000);
   }, []);
+
+  const handleClickStartButton = () => {
+    console.log(timers);
+    setTimers(timers.concat(new Timer(25)));
+    refTimers.current = timers;
+  }
 
   const TaskList = (<ul className="tasklist">
     {
@@ -113,7 +203,9 @@ function App() {
           </svg>
           <div className="timer_circle_count">25:00</div>
         </div>
-        <button className="timer_start">タイマースタート</button>
+        <button className="timer_start" onClick={() =>{
+          handleClickStartButton();
+        }}>タイマースタート</button>
       </div>
     </div >
   );
